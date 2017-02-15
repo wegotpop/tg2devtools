@@ -12,7 +12,7 @@ install_requirements = [
     'TurboGears2 >= 2.3.10',
     'gearbox >= 0.1.1',
     'backlash >= 0.0.7',
-    'WebTest<2.0',
+    'WebTest >= 1.0',
     'tgext.debugbar'
 ]
 

@@ -6,10 +6,14 @@ import sys, os
 test_requirements = [
     'nose',
     'virtualenv == 1.10',
+    'kajiki',
+    'genshi',
+    'jinja2',
+    'mako'
 ]
 
 install_requirements = [
-    'TurboGears2 >= 2.3.10',
+    'TurboGears2 >= 2.3.12',
     'gearbox >= 0.1.1',
     'backlash >= 0.0.7',
     'WebTest >= 1.0',
@@ -18,12 +22,12 @@ install_requirements = [
 
 setup(
     name='tg.devtools',
-    version="2.3.10",
+    version="2.3.12",
     description="",
     long_description="""""",
     classifiers=[],
     keywords='turbogears',
-    author="TurboGears Team 2008-2015",
+    author="TurboGears Team 2008-2018",
     author_email="turbogears@groups.google.com",
     url="http://www.turbogears.org",
     license="MIT",

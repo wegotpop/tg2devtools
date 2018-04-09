@@ -2,15 +2,19 @@ import os
 import shutil
 import subprocess
 import sys
-from nose.tools import ok_
+import site
 import pkg_resources
+
+from nose.tools import ok_
 from webtest import TestApp
 from itertools import count
 from nose import SkipTest
 from virtualenv import create_environment
-import site
+from tg.util import Bunch
 
 from devtools.gearbox.quickstart import QuickstartCommand
+from gearbox.commands.setup_app import SetupAppCommand
+
 
 PY_VERSION = sys.version_info[:2]
 PY2 = sys.version_info[0] == 2
@@ -18,6 +22,7 @@ PROJECT_NAME = 'TGTest-%02d'
 ENV_NAME = 'TESTENV'
 CLEANUP = True
 COUNTER = count()
+QUIET = '-q'  # Set this to -v to enable installed packages logging, or to -q to disable it
 
 
 def get_passed_and_failed(env_cmd, python_cmd, testpath):
@@ -75,31 +80,27 @@ class BaseTestQuickStart(object):
 
         # Reinstall gearbox to force it being installed inside the
         # virtualenv using supported PBR version
-        subprocess.call([cls.pip_cmd, '-q', 'install', '-U', 'setuptools'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', '-I', 'gearbox'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '-U', 'setuptools==18.0.1'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--pre', '-I', 'gearbox'])
         for p in cls.preinstall:
-            subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', '-I', p])
+            subprocess.call([cls.pip_cmd, QUIET, 'install', '--pre', '-I', p])
 
         # Install TurboGears from development branch to test future compatibility
-        subprocess.call([cls.pip_cmd, '-q', 'install', '-I', 'git+git://github.com/TurboGears/crank.git'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '-I', 'git+git://github.com/TurboGears/backlash.git'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '-I', 'git+git://github.com/TurboGears/tgext.debugbar.git'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '-I', 'git+git://github.com/TurboGears/tg2.git@development'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '-I', 'git+git://github.com/TurboGears/crank.git'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '-I', 'git+git://github.com/TurboGears/backlash.git'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '-I', 'git+git://github.com/TurboGears/tgext.debugbar.git'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '-I', 'git+git://github.com/TurboGears/tg2.git@master'])
 
         # Install tg.devtools inside the virtualenv
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', '-e', cls.base_dir])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--pre', '-e', cls.base_dir])
 
         # Install All Template Engines inside the virtualenv so that
         # They all get configured as we share a single python process
         # for all configurations.
-        if PY_VERSION == (3, 2):
-            jinja_version = 'Jinja2 < 2.7'
-        else:
-            jinja_version = 'Jinja2'
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', jinja_version])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', 'Genshi'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', 'mako'])
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', 'kajiki'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--upgrade', '--no-deps', '--force-reinstall', '--pre', 'Jinja2'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--upgrade', '--no-deps', '--force-reinstall', '--pre', 'Genshi'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--upgrade', '--no-deps', '--force-reinstall', '--pre', 'mako'])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--upgrade', '--no-deps', '--force-reinstall', '--pre', 'kajiki'])
 
         # This is to avoid the TGTest package to be detected as
         # being already installed.
@@ -111,7 +112,7 @@ class BaseTestQuickStart(object):
         cls.command.run(opts)
 
         # Install quickstarted project dependencies
-        subprocess.call([cls.pip_cmd, '-q', 'install', '--pre', '-e', cls.proj_dir])
+        subprocess.call([cls.pip_cmd, QUIET, 'install', '--pre', '-e', cls.proj_dir])
 
         # Mark the packages as installed even outside the virtualenv
         # so we can load app in tests which are not executed inside
@@ -123,10 +124,18 @@ class BaseTestQuickStart(object):
 
     def setUp(self):
         os.chdir(self.proj_dir)
-
         from paste.deploy import loadapp
         self.app = loadapp('config:test.ini', relative_to=self.proj_dir)
         self.app = TestApp(self.app)
+
+    def init_database(self):
+        os.chdir(self.proj_dir)
+        cmd = SetupAppCommand(Bunch(options=Bunch(verbose_level=1)), Bunch())
+        try:
+            cmd.run(Bunch(config_file='config:test.ini', section_name=None))
+        except:
+            # DB already initialised, ignore it.
+            pass
 
     @classmethod
     def tearDownClass(cls):
@@ -166,7 +175,7 @@ class BaseTestQuickStart(object):
                 sys.path.remove(item)
         sys.path[:0] = new_sys_path
 
-        return  (os.path.join(cls.bin_dir, 'pip'),
+        return (os.path.join(cls.bin_dir, 'pip'),
                 os.path.join(cls.bin_dir, 'python'),
                 os.path.join(cls.bin_dir, 'activate'),
                 site_packages)
@@ -236,7 +245,36 @@ class CommonTestQuickStart(BaseTestQuickStart):
                     ok_(False, 'Did not skip %s' % must_skip)
 
 
-class TestDefaultQuickStart(CommonTestQuickStart):
+class CommonTestQuickStartWithAuth(CommonTestQuickStart):
+    def test_unauthenticated_admin_with_prefix(self):
+        resp1 = self.app.get('/prefix/admin/', extra_environ={'SCRIPT_NAME': '/prefix'}, status=302)
+        ok_(resp1.headers['Location'] == 'http://localhost/prefix/login?came_from=%2Fprefix%2Fadmin%2F',
+            resp1.headers['Location'])
+        resp2 = resp1.follow(extra_environ={'SCRIPT_NAME': '/prefix'})
+        ok_('/prefix/login_handler' in resp2, resp2)
+
+    def test_login_with_prefix(self):
+        self.init_database()
+        resp1 = self.app.post('/prefix/login_handler?came_from=%2Fprefix%2Fadmin%2F',
+                              params={'login': 'editor', 'password': 'editpass'},
+                              extra_environ={'SCRIPT_NAME': '/prefix'})
+        ok_(resp1.headers['Location'] == 'http://localhost/prefix/post_login?came_from=%2Fprefix%2Fadmin%2F',
+            resp1.headers['Location'])
+        resp2 = resp1.follow(extra_environ={'SCRIPT_NAME': '/prefix'})
+        ok_(resp2.headers['Location'] == 'http://localhost/prefix/admin/',
+            resp2.headers['Location'])
+
+    def test_login_failure_with_prefix(self):
+        self.init_database()
+        resp = self.app.post('/prefix/login_handler?came_from=%2Fprefix%2Fadmin%2F',
+                             params={'login': 'WRONG', 'password': 'WRONG'},
+                             extra_environ={'SCRIPT_NAME': '/prefix'})
+        location = resp.headers['Location']
+        ok_('http://localhost/prefix/login' in location, location)
+        ok_('came_from=%2Fprefix%2Fadmin%2F' in location, location)
+
+
+class TestDefaultQuickStart(CommonTestQuickStartWithAuth):
     args = ''
 
     @classmethod
@@ -342,7 +380,7 @@ class TestNoAuthQuickStart(CommonTestQuickStart):
         self.app.get('/admin', status=404)
 
 
-class TestMingBQuickStart(CommonTestQuickStart):
+class TestMingBQuickStart(CommonTestQuickStartWithAuth):
 
     args = '--ming'
     # preinstall = ['Paste', 'PasteScript']  # Ming doesn't require those anymore
